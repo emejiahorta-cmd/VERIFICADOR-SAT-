@@ -486,7 +486,12 @@ function saveMapToLS(lista, map) {
     map.forEach((entries, rfc) => entries.forEach(e => rows.push([rfc, e.nombre||'', e.situacion||'', e.fecha||'', e.entidad||''])));
     const raw = JSON.stringify(rows);
     const comp = pako.deflate(new TextEncoder().encode(raw));
-    const b64 = btoa(String.fromCharCode(...comp));
+    // Chunked btoa to avoid Maximum call stack size exceeded with large arrays
+    let b64 = '';
+    const BTOA_CHUNK = 8192;
+    for(let i = 0; i < comp.length; i += BTOA_CHUNK) {
+      b64 += btoa(String.fromCharCode(...comp.subarray(i, i + BTOA_CHUNK)));
+    }
     const CHUNK = 4_500_000;
     // Limpiar chunks viejos
     localStorage.removeItem(cfg.key+'_json');
@@ -508,7 +513,11 @@ function saveToLS(lista, csvText, filename) {
     const cfg = LISTA_CONFIG[lista];
     if(!cfg) return;
     const compressed = pako.deflate(new TextEncoder().encode(csvText));
-    const b64 = btoa(String.fromCharCode(...compressed));
+    let b64 = '';
+    const BTOA_CHUNK = 8192;
+    for(let i = 0; i < compressed.length; i += BTOA_CHUNK) {
+      b64 += btoa(String.fromCharCode(...compressed.subarray(i, i + BTOA_CHUNK)));
+    }
     // Firmes puede ser >5MB, dividir si es necesario
     const CHUNK = 4_500_000;
     if(b64.length > CHUNK) {
@@ -903,7 +912,9 @@ function importDB(file) {
         try {
           const raw=JSON.stringify(rows);
           const comp=pako.deflate(new TextEncoder().encode(raw));
-          const b64=btoa(String.fromCharCode(...comp));
+          let b64='';
+          const BTOA_CHUNK=8192;
+          for(let i=0;i<comp.length;i+=BTOA_CHUNK){b64+=btoa(String.fromCharCode(...comp.subarray(i,i+BTOA_CHUNK)));}
           const CHUNK=4_500_000;
           if(b64.length>CHUNK){
             const n=Math.ceil(b64.length/CHUNK);
