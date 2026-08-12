@@ -4,7 +4,42 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GOMSA — Verificador SAT</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js">
+// ============================================================
+// DIAGNÓSTICO DE PERSISTENCIA
+// ============================================================
+function runDiagnostic() {
+  const results = [];
+  const cfg_keys = Object.entries(LISTA_CONFIG).map(([name, cfg]) => ({name, cfg}));
+  
+  results.push('=== CLAVES EN LOCALSTORAGE ===');
+  let totalBytes = 0;
+  for(let i=0;i<localStorage.length;i++) {
+    const k = localStorage.key(i);
+    const v = localStorage.getItem(k) || '';
+    totalBytes += v.length;
+    if(k.startsWith('gomsa_')) results.push(k + ' → ' + v.length + ' chars');
+  }
+  results.push('Total: ' + Math.round(totalBytes/1024) + ' KB');
+  results.push('');
+  results.push('=== DB EN MEMORIA ===');
+  for(const [lista, map] of Object.entries(DB)) {
+    results.push(lista + ': ' + (map ? map.size : 0) + ' RFCs');
+  }
+  results.push('');
+  results.push('=== META ===');
+  const meta = JSON.parse(localStorage.getItem('gomsa_meta')||'{}');
+  results.push(JSON.stringify(meta, null, 2));
+  
+  document.getElementById('diagOutput').textContent = results.join('\n');
+  document.getElementById('diagPanel').style.display = 'block';
+}
+
+function closeDiag() {
+  document.getElementById('diagPanel').style.display = 'none';
+}
+
+</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -188,7 +223,8 @@ tr:last-child td{border-bottom:none}
         <div class="card-head-title">Estado de los listados</div>
         <div class="card-head-sub">Los datos se guardan en el navegador (localStorage). Se conservan al cerrar y reabrir la página.</div>
       </div>
-      <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="refreshStatus()">↻ Actualizar</button>
+      <button class="btn btn-secondary btn-sm" onclick="refreshStatus()">↻ Actualizar</button>
+        <button class="btn btn-secondary btn-sm" style="margin-left:4px" onclick="runDiagnostic()">🔍 Diagnóstico</button>
     </div>
     <div class="card-body">
       <div class="listas-grid" id="listasGrid"><!-- generado por JS --></div>
@@ -463,7 +499,8 @@ function saveMapToLS(lista, map) {
     } else {
       localStorage.setItem(cfg.key+'_json', b64);
     }
-  } catch(e) { console.warn('saveMapToLS error', lista, e); }
+    console.log('[GOMSA] saveMapToLS OK:', lista, rows.length, 'rows, b64:', b64.length, 'chars');
+  } catch(e) { console.warn('[GOMSA] saveMapToLS error', lista, e); }
 }
 
 function saveToLS(lista, csvText, filename) {
@@ -492,7 +529,9 @@ function saveToLS(lista, csvText, filename) {
 }
 
 function loadAllFromStorage() {
+  console.log('[GOMSA] loadAllFromStorage iniciado');
   const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
+  console.log('[GOMSA] meta:', JSON.stringify(meta));;
   for(const [lista, cfg] of Object.entries(LISTA_CONFIG)) {
     // Intentar carga desde JSON importado (más rápido)
     try {
@@ -509,7 +548,7 @@ function loadAllFromStorage() {
           if(!map.has(rfc))map.set(rfc,[]);
           map.get(rfc).push({nombre,situacion,fecha,entidad});
         }
-        DB[lista]=map; continue;
+        DB[lista]=map; console.log('[GOMSA] Cargado desde JSON:', lista, map.size, 'RFCs'); continue;
       }
     } catch(e){}
     // Fallback: carga desde CSV comprimido
@@ -523,10 +562,11 @@ function loadAllFromStorage() {
       const binary=atob(b64);const bytes=new Uint8Array(binary.length);
       for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
       const text=new TextDecoder().decode(pako.inflate(bytes));
-      DB[lista]=parseCSV(text,lista);
-    } catch(e){console.warn('Error loading',lista,e);}
+      DB[lista]=parseCSV(text,lista); console.log('[GOMSA] Cargado desde CSV:', lista, DB[lista].size, 'RFCs');
+    } catch(e){console.warn('[GOMSA] Error loading',lista,e);}
   }
   const hasData=Object.keys(DB).length>0;
+  console.log('[GOMSA] Listas en memoria:', Object.keys(DB).join(', ') || 'NINGUNA');
   document.getElementById('no-data-alert').style.display=hasData?'none':'flex';
 }
 
@@ -936,6 +976,51 @@ function showProgress(pct){ document.getElementById('progressBar').style.display
 function hideProgress(){ document.getElementById('progressBar').style.display='none'; document.getElementById('progressFill').style.width='0'; }
 function setLoadStatus(msg){ document.getElementById('loadStatus').textContent=msg; }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// ============================================================
+// DIAGNÓSTICO DE PERSISTENCIA
+// ============================================================
+function runDiagnostic() {
+  const results = [];
+  const cfg_keys = Object.entries(LISTA_CONFIG).map(([name, cfg]) => ({name, cfg}));
+  
+  results.push('=== CLAVES EN LOCALSTORAGE ===');
+  let totalBytes = 0;
+  for(let i=0;i<localStorage.length;i++) {
+    const k = localStorage.key(i);
+    const v = localStorage.getItem(k) || '';
+    totalBytes += v.length;
+    if(k.startsWith('gomsa_')) results.push(k + ' → ' + v.length + ' chars');
+  }
+  results.push('Total: ' + Math.round(totalBytes/1024) + ' KB');
+  results.push('');
+  results.push('=== DB EN MEMORIA ===');
+  for(const [lista, map] of Object.entries(DB)) {
+    results.push(lista + ': ' + (map ? map.size : 0) + ' RFCs');
+  }
+  results.push('');
+  results.push('=== META ===');
+  const meta = JSON.parse(localStorage.getItem('gomsa_meta')||'{}');
+  results.push(JSON.stringify(meta, null, 2));
+  
+  document.getElementById('diagOutput').textContent = results.join('\n');
+  document.getElementById('diagPanel').style.display = 'block';
+}
+
+function closeDiag() {
+  document.getElementById('diagPanel').style.display = 'none';
+}
+
 </script>
+
+<!-- DIAGNÓSTICO -->
+<div id="diagPanel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1A2744;color:#8FA3C3;padding:16px;font-family:monospace;font-size:11px;max-height:40vh;overflow:auto;z-index:9999">
+  <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+    <strong style="color:#fff">Diagnóstico de persistencia</strong>
+    <button onclick="closeDiag()" style="background:rgba(255,255,255,.1);border:none;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer">✕ Cerrar</button>
+  </div>
+  <pre id="diagOutput" style="margin:0;white-space:pre-wrap"></pre>
+</div>
+
 </body>
 </html>
