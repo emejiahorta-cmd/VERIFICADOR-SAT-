@@ -335,8 +335,7 @@ let history_data = [];
 // INICIO
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
-  loadAllFromStorage();
-  renderListasGrid();
+  loadAllFromStorage().then(() => renderListasGrid());
   loadHistory();
   document.getElementById('searchInput').addEventListener('keydown', e => {
     if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) doSearch();
@@ -403,10 +402,9 @@ function processFile(file) {
         const map = parseCSV(text, lista);
         // Guardar en memoria
         DB[lista] = map;
-        // Guardar en localStorage (comprimido CSV)
-        saveToLS(lista, text, file.name);
-        // TAMBIÉN guardar en formato JSON para carga rápida y persistencia robusta
-        saveMapToLS(lista, map);
+        // Guardar en IndexedDB (sin límite de tamaño)
+        await saveMapToIDB(lista, map);
+        saveMeta(lista, file.name);
         setLoadStatus(`✓ ${lista} cargado — ${countRecords(map)} registros`);
         await sleep(200);
         resolve();
@@ -478,106 +476,107 @@ function countRecords(map) {
   let n=0; map.forEach(v=>n+=v.length); return n;
 }
 
-function saveMapToLS(lista, map) {
-  const cfg = LISTA_CONFIG[lista];
-  if(!cfg || !map || !map.size) return;
-  try {
-    const rows = [];
-    map.forEach((entries, rfc) => entries.forEach(e => rows.push([rfc, e.nombre||'', e.situacion||'', e.fecha||'', e.entidad||''])));
-    const raw = JSON.stringify(rows);
-    const comp = pako.deflate(new TextEncoder().encode(raw));
-    // Chunked btoa to avoid Maximum call stack size exceeded with large arrays
-    let b64 = '';
-    const BTOA_CHUNK = 8192;
-    for(let i = 0; i < comp.length; i += BTOA_CHUNK) {
-      b64 += btoa(String.fromCharCode(...comp.subarray(i, i + BTOA_CHUNK)));
-    }
-    const CHUNK = 4_500_000;
-    // Limpiar chunks viejos
-    localStorage.removeItem(cfg.key+'_json');
-    const oldChunks = localStorage.getItem(cfg.key+'_json_chunks');
-    if(oldChunks) { const n=parseInt(oldChunks); for(let i=0;i<n;i++) localStorage.removeItem(cfg.key+'_json_'+i); localStorage.removeItem(cfg.key+'_json_chunks'); }
-    if(b64.length > CHUNK) {
-      const n = Math.ceil(b64.length/CHUNK);
-      for(let i=0;i<n;i++) localStorage.setItem(cfg.key+'_json_'+i, b64.slice(i*CHUNK,(i+1)*CHUNK));
-      localStorage.setItem(cfg.key+'_json_chunks', String(n));
-    } else {
-      localStorage.setItem(cfg.key+'_json', b64);
-    }
-    console.log('[GOMSA] saveMapToLS OK:', lista, rows.length, 'rows, b64:', b64.length, 'chars');
-  } catch(e) { console.warn('[GOMSA] saveMapToLS error', lista, e); }
+
+// ============================================================
+// PERSISTENCIA CON INDEXEDDB (sin límite de tamaño, sin btoa)
+// ============================================================
+const IDB_NAME = 'gomsa_sat';
+const IDB_STORE = 'listas';
+const IDB_VERSION = 1;
+let _idb = null;
+
+function openIDB() {
+  return new Promise((resolve, reject) => {
+    if(_idb) { resolve(_idb); return; }
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = e => { _idb = e.target.result; resolve(_idb); };
+    req.onerror = e => reject(e.target.error);
+  });
 }
 
-function saveToLS(lista, csvText, filename) {
-  try {
-    const cfg = LISTA_CONFIG[lista];
-    if(!cfg) return;
-    const compressed = pako.deflate(new TextEncoder().encode(csvText));
-    let b64 = '';
-    const BTOA_CHUNK = 8192;
-    for(let i = 0; i < compressed.length; i += BTOA_CHUNK) {
-      b64 += btoa(String.fromCharCode(...compressed.subarray(i, i + BTOA_CHUNK)));
-    }
-    // Firmes puede ser >5MB, dividir si es necesario
-    const CHUNK = 4_500_000;
-    if(b64.length > CHUNK) {
-      const n = Math.ceil(b64.length/CHUNK);
-      for(let i=0;i<n;i++) localStorage.setItem(cfg.key+'_'+i, b64.slice(i*CHUNK,(i+1)*CHUNK));
-      localStorage.setItem(cfg.key+'_chunks', String(n));
-    } else {
-      localStorage.setItem(cfg.key, b64);
-      localStorage.removeItem(cfg.key+'_chunks');
-    }
-    // Meta
-    const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
-    meta[lista] = { filename, size: csvText.length, ts: new Date().toLocaleString('es-MX'), records: countRecords(DB[lista]) };
-    localStorage.setItem(LS_META_KEY, JSON.stringify(meta));
-  } catch(e) {
-    console.warn('localStorage save error:', e);
+async function idbSet(key, value) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = resolve;
+    tx.onerror = e => reject(e.target.error);
+  });
+}
+
+async function idbGet(key) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+async function idbDel(key) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = resolve;
+    tx.onerror = e => reject(e.target.error);
+  });
+}
+
+async function saveMapToIDB(lista, map) {
+  if(!map || !map.size) return;
+  const rows = [];
+  map.forEach((entries, rfc) => entries.forEach(e => rows.push([rfc, e.nombre||'', e.situacion||'', e.fecha||'', e.entidad||''])));
+  await idbSet('lista_' + lista, rows);
+  console.log('[GOMSA] Guardado en IDB:', lista, rows.length, 'rows');
+}
+
+async function loadMapFromIDB(lista) {
+  const rows = await idbGet('lista_' + lista);
+  if(!rows || !rows.length) return null;
+  const map = new Map();
+  for(const [rfc, nombre, situacion, fecha, entidad] of rows) {
+    if(!map.has(rfc)) map.set(rfc, []);
+    map.get(rfc).push({nombre, situacion, fecha, entidad});
   }
+  console.log('[GOMSA] Cargado desde IDB:', lista, map.size, 'RFCs');
+  return map;
 }
 
-function loadAllFromStorage() {
+async function delListaFromIDB(lista) {
+  await idbDel('lista_' + lista);
+}
+
+// Guardar meta en localStorage (es pequeño, no hay problema)
+function saveMeta(lista, filename) {
+  const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
+  meta[lista] = { filename, ts: new Date().toLocaleString('es-MX'), records: DB[lista] ? DB[lista].size : 0 };
+  localStorage.setItem(LS_META_KEY, JSON.stringify(meta));
+}
+
+async function loadAllFromStorage() {
   console.log('[GOMSA] loadAllFromStorage iniciado');
   const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
-  console.log('[GOMSA] meta:', JSON.stringify(meta));;
-  for(const [lista, cfg] of Object.entries(LISTA_CONFIG)) {
-    // Intentar carga desde JSON importado (más rápido)
+  console.log('[GOMSA] meta:', JSON.stringify(meta));
+  let loaded = 0;
+  for(const [lista] of Object.entries(LISTA_CONFIG)) {
     try {
-      const jc=localStorage.getItem(cfg.key+'_json_chunks');
-      let b64j='';
-      if(jc){const n=parseInt(jc);for(let i=0;i<n;i++)b64j+=localStorage.getItem(cfg.key+'_json_'+i)||'';}
-      else b64j=localStorage.getItem(cfg.key+'_json')||'';
-      if(b64j){
-        const bin=atob(b64j);const bytes=new Uint8Array(bin.length);
-        for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
-        const rows=JSON.parse(new TextDecoder().decode(pako.inflate(bytes)));
-        const map=new Map();
-        for(const [rfc,nombre,situacion,fecha,entidad] of rows){
-          if(!map.has(rfc))map.set(rfc,[]);
-          map.get(rfc).push({nombre,situacion,fecha,entidad});
-        }
-        DB[lista]=map; console.log('[GOMSA] Cargado desde JSON:', lista, map.size, 'RFCs'); continue;
-      }
-    } catch(e){}
-    // Fallback: carga desde CSV comprimido
-    if(!meta[lista]) continue;
-    try {
-      let b64;
-      const chunks=localStorage.getItem(cfg.key+'_chunks');
-      if(chunks){const n=parseInt(chunks);b64='';for(let i=0;i<n;i++)b64+=localStorage.getItem(cfg.key+'_'+i)||'';}
-      else b64=localStorage.getItem(cfg.key)||'';
-      if(!b64) continue;
-      const binary=atob(b64);const bytes=new Uint8Array(binary.length);
-      for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
-      const text=new TextDecoder().decode(pako.inflate(bytes));
-      DB[lista]=parseCSV(text,lista); console.log('[GOMSA] Cargado desde CSV:', lista, DB[lista].size, 'RFCs');
-    } catch(e){console.warn('[GOMSA] Error loading',lista,e);}
+      const map = await loadMapFromIDB(lista);
+      if(map && map.size > 0) { DB[lista] = map; loaded++; }
+    } catch(e) { console.warn('[GOMSA] Error cargando', lista, e); }
   }
-  const hasData=Object.keys(DB).length>0;
   console.log('[GOMSA] Listas en memoria:', Object.keys(DB).join(', ') || 'NINGUNA');
-  document.getElementById('no-data-alert').style.display=hasData?'none':'flex';
+  const hasData = loaded > 0;
+  document.getElementById('no-data-alert').style.display = hasData ? 'none' : 'flex';
+  renderListasGrid();
+  updateDbStatus();
 }
+
 
 // ============================================================
 // BÚSQUEDA
@@ -822,12 +821,9 @@ function renderListasGrid() {
   }).join('');
 }
 
-function deleteLista(name) {
-  if(!confirm(`¿Eliminar la lista "${name}"?`)) return;
-  const cfg = LISTA_CONFIG[name];
-  localStorage.removeItem(cfg.key);
-  const chunks = localStorage.getItem(cfg.key+'_chunks');
-  if(chunks) { const n=parseInt(chunks); for(let i=0;i<n;i++) localStorage.removeItem(cfg.key+'_'+i); localStorage.removeItem(cfg.key+'_chunks'); }
+async function deleteLista(name) {
+  if(!confirm('¿Eliminar la lista "'+name+'"?')) return;
+  await delListaFromIDB(name);
   const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
   delete meta[name];
   localStorage.setItem(LS_META_KEY, JSON.stringify(meta));
@@ -836,12 +832,10 @@ function deleteLista(name) {
   updateDbStatus();
 }
 
-function clearAll() {
+async function clearAll() {
   if(!confirm('¿Borrar TODOS los listados? Esta acción no se puede deshacer.')) return;
-  for(const cfg of Object.values(LISTA_CONFIG)) {
-    localStorage.removeItem(cfg.key);
-    const chunks = localStorage.getItem(cfg.key+'_chunks');
-    if(chunks) { const n=parseInt(chunks); for(let i=0;i<n;i++) localStorage.removeItem(cfg.key+'_'+i); localStorage.removeItem(cfg.key+'_chunks'); }
+  for(const [lista] of Object.entries(LISTA_CONFIG)) {
+    await delListaFromIDB(lista);
   }
   localStorage.removeItem(LS_META_KEY);
   DB = {};
@@ -852,13 +846,16 @@ function clearAll() {
 
 function refreshStatus() { loadAllFromStorage(); renderListasGrid(); updateDbStatus(); }
 
-function showStorageInfo() {
-  let total = 0;
-  for(let i=0;i<localStorage.length;i++) {
-    const k = localStorage.key(i);
-    if(k.startsWith('gomsa_')) total += (localStorage.getItem(k)||'').length;
+async function showStorageInfo() {
+  const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
+  const listas = Object.keys(DB);
+  let msg = 'Listas en memoria: ' + (listas.length ? listas.join(', ') : 'ninguna') + '\n\n';
+  msg += 'Registros:\n';
+  for(const [lista, map] of Object.entries(DB)) {
+    msg += '  ' + lista + ': ' + map.size.toLocaleString() + ' RFCs\n';
   }
-  alert(`Espacio usado por GOMSA Verificador SAT:\n${(total/1024/1024).toFixed(2)} MB\n\n(El límite típico de localStorage es 5-10 MB por origen)`);
+  msg += '\nAlmacenamiento: IndexedDB (sin límite de tamaño)';
+  alert(msg);
 }
 
 function updateDbStatus() {
@@ -896,7 +893,7 @@ function importDB(file) {
   if(!file) return;
   document.getElementById('importInput').value='';
   const reader=new FileReader();
-  reader.onload=(e)=>{
+  reader.onload=async(e)=>{
     try {
       const out=JSON.parse(e.target.result);
       if(!out.version||!out.data) throw new Error('Formato inválido');
@@ -926,7 +923,12 @@ function importDB(file) {
           }
         } catch(err){console.warn('LS error',lista,err);}
       }
-      if(out.meta) localStorage.setItem(LS_META_KEY,JSON.stringify(out.meta));
+      // Rebuild meta from loaded data
+      const newMeta = {};
+      for(const [lista,rows] of Object.entries(out.data)) {
+        newMeta[lista] = {filename: out.meta && out.meta[lista] ? out.meta[lista].filename : 'importado', ts: new Date().toLocaleString('es-MX'), records: DB[lista] ? DB[lista].size : 0};
+      }
+      localStorage.setItem(LS_META_KEY, JSON.stringify(newMeta));
       renderListasGrid(); updateDbStatus();
       document.getElementById('no-data-alert').style.display='none';
       setLoadStatus('✓ Importado — '+total.toLocaleString()+' RFC únicos en '+Object.keys(out.data).length+' listas');
