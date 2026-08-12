@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GOMSA — Verificador SAT</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#1A2744;--gold:#C9A227;--red:#DC2626;--red-bg:#FEF2F2;--red-border:#FECACA;
+  --green:#16A34A;--green-bg:#F0FDF4;--green-border:#BBF7D0;
+  --amber-bg:#FFFBEB;--amber-border:#FDE68A;--amber-text:#92400E;
+  --gray-50:#F9F8F6;--gray-100:#F0EDE8;--gray-200:#E5DFD8;--gray-400:#9B9082;--gray-600:#6B5E4E;--gray-800:#3D3228;
+  --purple:#7C3AED;--blue:#0369A1;--orange:#C2410C;--teal:#065F46;
+  --radius:8px;--shadow:0 1px 4px rgba(0,0,0,.08)
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--gray-50);color:var(--gray-800);min-height:100vh}
+/* HEADER */
+.header{background:var(--navy);color:#fff;padding:14px 24px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.logo{width:38px;height:38px;background:var(--gold);border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:20px;color:var(--navy);flex-shrink:0}
+.header-title{font-weight:700;font-size:15px;letter-spacing:.4px}
+.header-sub{font-size:10px;color:#8FA3C3;margin-top:2px}
+.nav-tabs{display:flex;gap:4px;margin-left:auto}
+.tab-btn{background:transparent;border:none;color:#8FA3C3;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.3px;transition:all .15s}
+.tab-btn.active,.tab-btn:hover{background:rgba(255,255,255,.12);color:#fff}
+/* LAYOUT */
+.container{max-width:860px;margin:0 auto;padding:24px 20px}
+.page{display:none}
+.page.active{display:block}
+/* CARDS */
+.card{background:#fff;border-radius:12px;border:.5px solid var(--gray-200);box-shadow:var(--shadow);overflow:hidden;margin-bottom:16px}
+.card-head{padding:13px 18px;background:var(--gray-50);border-bottom:.5px solid var(--gray-200);display:flex;align-items:center;gap:10px}
+.card-head-title{font-size:13px;font-weight:700;color:var(--gray-800)}
+.card-head-sub{font-size:11px;color:var(--gray-400);margin-top:1px}
+.card-body{padding:16px 18px}
+/* STATUS BADGES */
+.status-pill{font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;letter-spacing:.4px}
+.pill-ok{background:var(--green-bg);color:var(--green);border:.5px solid var(--green-border)}
+.pill-err{background:var(--red-bg);color:var(--red);border:.5px solid var(--red-border)}
+.pill-warn{background:var(--amber-bg);color:var(--amber-text);border:.5px solid var(--amber-border)}
+.pill-gray{background:var(--gray-100);color:var(--gray-600);border:.5px solid var(--gray-200)}
+/* LISTAS GRID */
+.listas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:16px}
+.lista-card{background:#fff;border:.5px solid var(--gray-200);border-radius:var(--radius);padding:12px 14px;transition:border-color .15s}
+.lista-card.loaded{border-color:var(--green-border)}
+.lista-card.missing{border-color:var(--gray-200);opacity:.6}
+.lista-name{font-size:12px;font-weight:700;color:var(--gray-800);margin-bottom:4px}
+.lista-meta{font-size:10px;color:var(--gray-400)}
+.lista-count{font-size:11px;font-weight:600;margin-top:5px}
+/* DROP ZONE */
+.dropzone{border:2px dashed var(--gray-200);border-radius:10px;padding:32px;text-align:center;cursor:pointer;transition:all .2s;background:var(--gray-50)}
+.dropzone:hover,.dropzone.drag{border-color:var(--navy);background:#EEF0F6}
+.dropzone-icon{font-size:32px;margin-bottom:10px;color:var(--gray-400)}
+.dropzone-title{font-size:14px;font-weight:600;color:var(--gray-600);margin-bottom:4px}
+.dropzone-sub{font-size:12px;color:var(--gray-400)}
+/* SEARCH */
+.search-area{background:#fff;border-radius:12px;border:.5px solid var(--gray-200);padding:18px;margin-bottom:16px;box-shadow:var(--shadow)}
+.search-label{font-size:11px;font-weight:600;color:var(--gray-600);text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px;display:block}
+textarea.search-input{width:100%;height:90px;border:.5px solid var(--gray-200);border-radius:var(--radius);padding:9px 12px;font-size:13px;font-family:monospace;resize:vertical;background:var(--gray-50);color:var(--gray-800);outline:none;transition:border-color .15s}
+textarea.search-input:focus{border-color:var(--navy);background:#fff}
+.btn-row{display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap}
+.btn{border:none;border-radius:var(--radius);padding:9px 20px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;letter-spacing:.2px}
+.btn-primary{background:var(--navy);color:#fff}
+.btn-primary:hover{background:#243660}
+.btn-primary:disabled{background:#9BA8B8;cursor:not-allowed}
+.btn-secondary{background:transparent;border:.5px solid var(--gray-200);color:var(--gray-600)}
+.btn-secondary:hover{background:var(--gray-100)}
+.btn-danger{background:transparent;border:.5px solid #FECACA;color:var(--red)}
+.btn-danger:hover{background:var(--red-bg)}
+.btn-sm{padding:6px 12px;font-size:11px}
+.hint{font-size:11px;color:var(--gray-400)}
+/* RESULT CARDS */
+.result-card{background:#fff;border-radius:12px;border:.5px solid var(--gray-200);overflow:hidden;margin-bottom:14px;box-shadow:var(--shadow)}
+.result-card.has-hit{border:1.5px solid var(--red)}
+.result-head{padding:11px 16px;display:flex;align-items:center;gap:10px}
+.result-head.ok{background:var(--green-bg);border-bottom:.5px solid var(--green-border)}
+.result-head.err{background:var(--red-bg);border-bottom:.5px solid var(--red-border)}
+.result-head.loading{background:var(--gray-50);border-bottom:.5px solid var(--gray-200)}
+.result-head-icon{font-size:18px;flex-shrink:0}
+.result-head-title{font-size:13px;font-weight:700}
+.result-head-title.ok{color:var(--green)}
+.result-head-title.err{color:#991B1B}
+.result-head-sub{font-size:10px;color:var(--gray-400);margin-top:2px}
+.result-body{padding:13px 16px;display:flex;flex-direction:column;gap:11px}
+/* HIT */
+.hit{background:#FFF7F7;border:.5px solid var(--red-border);border-radius:var(--radius);padding:10px 12px}
+.hit-tags{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px}
+.tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;letter-spacing:.3px}
+.tag-lista{color:#fff}
+.tag-sit{background:#FEF3C7;color:#92400E}
+.tag-ent{background:#EFF6FF;color:#1D4ED8}
+.hit-rfc{font-family:monospace;font-weight:700;font-size:13px}
+.hit-nombre{font-size:12px;color:var(--gray-600);margin-top:2px}
+.hit-fecha{font-size:10px;color:var(--gray-400);margin-top:2px}
+/* CLEAN CHIPS */
+.clean-row{display:flex;flex-wrap:wrap;gap:6px}
+.chip-ok{background:var(--green-bg);border:.5px solid var(--green-border);color:var(--green);font-family:monospace;font-size:11px;padding:3px 9px;border-radius:6px}
+/* WARN */
+.warn-box{background:var(--amber-bg);border:.5px solid var(--amber-border);border-radius:var(--radius);padding:9px 12px}
+.warn-title{font-size:10px;font-weight:700;color:var(--amber-text);text-transform:uppercase;letter-spacing:.6px;margin-bottom:5px}
+.warn-item{font-size:11px;color:var(--amber-text);margin-bottom:2px}
+/* SUBSANACION */
+.sub-box{background:var(--gray-50);border:.5px solid var(--gray-200);border-radius:var(--radius);padding:13px 14px}
+.sub-title{font-size:10px;font-weight:700;color:var(--gray-600);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px}
+.sub-text{font-size:12px;color:var(--gray-600);line-height:1.65;margin-bottom:10px}
+.btn-copy{background:var(--navy);color:#fff;border:none;border-radius:var(--radius);padding:9px 16px;font-size:12px;font-weight:600;cursor:pointer;width:100%;transition:background .15s}
+.btn-copy:hover{background:#243660}
+.btn-copy.copied{background:var(--green)}
+/* SPINNER */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+/* PROGRESS */
+.progress-bar{height:3px;background:var(--gray-200);border-radius:99px;overflow:hidden;margin-bottom:12px}
+.progress-fill{height:100%;background:var(--navy);border-radius:99px;transition:width .3s;width:0}
+/* EMPTY */
+.empty-state{text-align:center;padding:48px 20px;color:var(--gray-400)}
+.empty-icon{font-size:40px;margin-bottom:12px}
+.empty-title{font-size:14px;font-weight:600;color:var(--gray-600);margin-bottom:6px}
+.empty-sub{font-size:12px}
+/* ALERT */
+.alert{border-radius:var(--radius);padding:10px 14px;font-size:12px;margin-bottom:12px;display:flex;gap:8px;align-items:flex-start}
+.alert-info{background:#EFF6FF;border:.5px solid #BFDBFE;color:#1D4ED8}
+.alert-warn{background:var(--amber-bg);border:.5px solid var(--amber-border);color:var(--amber-text)}
+/* DIVIDER */
+.divider{border:none;border-top:.5px solid var(--gray-200);margin:16px 0}
+/* TABLE */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:8px 10px;background:var(--gray-50);color:var(--gray-600);font-weight:600;border-bottom:.5px solid var(--gray-200)}
+td{padding:8px 10px;border-bottom:.5px solid var(--gray-100);vertical-align:top}
+tr:last-child td{border-bottom:none}
+/* RESPONSIVE */
+@media(max-width:600px){.container{padding:16px 12px}.listas-grid{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">G</div>
+  <div>
+    <div class="header-title">GOMSA — Verificador SAT</div>
+    <div class="header-sub">Listas 69-B · 69-B Bis · Exigibles · Firmes · No Localizados · Sentencias · Definitivos</div>
+  </div>
+  <div class="nav-tabs">
+    <button class="tab-btn active" onclick="showPage('verificar')">🔍 Verificar</button>
+    <button class="tab-btn" onclick="showPage('listados')">📂 Listados</button>
+    <button class="tab-btn" onclick="showPage('historial')">📋 Historial</button>
+  </div>
+</div>
+
+<!-- ========== VERIFICAR ========== -->
+<div class="page active" id="page-verificar">
+<div class="container">
+
+  <div id="no-data-alert" class="alert alert-warn" style="display:none">
+    ⚠️ <span>No hay listados cargados. Ve a la pestaña <strong>Listados</strong> para cargar los archivos CSV del SAT.</span>
+  </div>
+
+  <div class="search-area">
+    <label class="search-label">RFC o Nombre — uno por línea, o separados por coma</label>
+    <textarea class="search-input" id="searchInput" placeholder="XAXX010101000&#10;JUAN GARCIA LOPEZ&#10;MYC840312AB3, SOC120901XY7"></textarea>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="searchBtn" onclick="doSearch()">Verificar</button>
+      <button class="btn btn-secondary" onclick="clearResults()">Limpiar resultados</button>
+      <span class="hint">Ctrl+Enter para buscar</span>
+      <span id="dbStatus" class="hint" style="margin-left:auto"></span>
+    </div>
+  </div>
+
+  <div id="resultsContainer">
+    <div class="empty-state">
+      <div class="empty-icon">🔍</div>
+      <div class="empty-title">Ingresa RFC o nombres arriba</div>
+      <div class="empty-sub">Los resultados aparecerán aquí</div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ========== LISTADOS ========== -->
+<div class="page" id="page-listados">
+<div class="container">
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-head-title">Estado de los listados</div>
+        <div class="card-head-sub">Los datos se guardan en el navegador (localStorage). Se conservan al cerrar y reabrir la página.</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="refreshStatus()">↻ Actualizar</button>
+    </div>
+    <div class="card-body">
+      <div class="listas-grid" id="listasGrid"><!-- generado por JS --></div>
+      <div class="progress-bar" id="progressBar" style="display:none"><div class="progress-fill" id="progressFill"></div></div>
+      <div id="loadStatus" style="font-size:11px;color:var(--gray-400);margin-bottom:10px"></div>
+      <hr class="divider" style="margin:12px 0">
+      <div style="font-size:11px;font-weight:600;color:var(--gray-600);text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px">Base de datos procesada</div>
+      <div class="alert alert-info" style="margin-bottom:10px;font-size:11px">
+        💡 Exporta la base de datos una vez que hayas cargado los CSV. La próxima vez importa el <code>.json</code> directamente — carga en segundos sin reparse.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn btn-primary btn-sm" onclick="exportDB()">⬇ Exportar base de datos (.json)</button>
+        <button class="btn btn-secondary btn-sm" id="btnImport">⬆ Importar base de datos (.json)</button>
+        <input type="file" id="importInput" accept=".json" style="display:none" onchange="importDB(this.files[0])">
+      </div>
+      <hr class="divider" style="margin:12px 0">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-danger btn-sm" onclick="clearAll()">🗑 Borrar todos los listados</button>
+        <button class="btn btn-secondary btn-sm" onclick="showStorageInfo()">ℹ Espacio usado</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-head-title">Cargar archivos CSV</div>
+        <div class="card-head-sub">Arrastra uno o varios archivos CSV del SAT. Los archivos existentes se reemplazarán automáticamente.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info" style="margin-bottom:14px">
+        📌 Los archivos de <strong>Firmes</strong> y <strong>EFOS</strong> son los de mayor volumen. Pueden tardar 5–15 segundos en procesarse.
+      </div>
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFiles(event)">
+        <div class="dropzone-icon">📁</div>
+        <div class="dropzone-title">Arrastra los archivos CSV aquí</div>
+        <div class="dropzone-sub">o haz clic para seleccionar archivos</div>
+      </div>
+      <input type="file" id="fileInput" accept=".csv" multiple style="display:none" onchange="handleFiles(this.files)">
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="card-head-title">Guía de nombres de archivo</div>
+      <div class="card-head-sub">El sistema identifica los listados por palabras clave en el nombre del archivo</div>
+    </div>
+    <div class="card-body">
+      <table>
+        <thead><tr><th>Lista</th><th>Palabras clave reconocidas</th><th>Fundamento</th></tr></thead>
+        <tbody>
+          <tr><td><span class="status-pill pill-err">69-B EFOS</span></td><td><code>69-B</code>, <code>69B</code>, <code>EFOS</code>, <code>listado_completo</code></td><td>Art. 69-B CFF — Operaciones simuladas</td></tr>
+          <tr><td><span class="status-pill pill-warn">69-B Bis EDOS</span></td><td><code>69_B_Bis</code>, <code>69BBis</code>, <code>EDOS</code></td><td>Art. 69-B Bis CFF — Deducción de EFOS</td></tr>
+          <tr><td><span class="status-pill" style="background:#EDE9FE;color:#5B21B6;border:.5px solid #C4B5FD">Exigibles</span></td><td><code>Exigible</code></td><td>Art. 69 CFF frac. VII</td></tr>
+          <tr><td><span class="status-pill" style="background:#FFF7ED;color:#C2410C;border:.5px solid #FED7AA">Firmes</span></td><td><code>Firme</code></td><td>Art. 69 CFF — Créditos fiscales firmes</td></tr>
+          <tr><td><span class="status-pill" style="background:#EFF6FF;color:#1D4ED8;border:.5px solid #BFDBFE">No Localizados</span></td><td><code>No_localizado</code>, <code>NoLocalizado</code></td><td>Art. 69 CFF frac. I</td></tr>
+          <tr><td><span class="status-pill" style="background:#ECFDF5;color:#065F46;border:.5px solid #A7F3D0">Sentencias</span></td><td><code>Sentencia</code></td><td>Sentencias favorables al contribuyente</td></tr>
+          <tr><td><span class="status-pill" style="background:#FEF2F2;color:#991B1B;border:.5px solid #FECACA">Definitivos</span></td><td><code>Definitivo</code></td><td>Art. 69-B CFF — EFOS definitivos</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ========== HISTORIAL ========== -->
+<div class="page" id="page-historial">
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div style="font-size:14px;font-weight:600;color:var(--gray-800)">Historial de consultas</div>
+    <button class="btn btn-secondary btn-sm" onclick="clearHistory()">Limpiar historial</button>
+  </div>
+  <div id="historialContainer">
+    <div class="empty-state">
+      <div class="empty-icon">📋</div>
+      <div class="empty-title">Sin consultas aún</div>
+      <div class="empty-sub">Las búsquedas realizadas aparecerán aquí</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+// ============================================================
+// CONSTANTES
+// ============================================================
+const LISTA_CONFIG = {
+  "69-B EFOS":    {color:"#DC2626", key:"gomsa_efos",    pattern:/69.?b(?!.?bis)|efos|listado.?completo/i, estiloHeader:"efos"},
+  "69-B Bis EDOS":{color:"#B45309", key:"gomsa_edos",    pattern:/69.?b.?bis|edos/i, estiloHeader:"edos"},
+  "Exigibles":    {color:"#7C3AED", key:"gomsa_exig",    pattern:/exigible/i},
+  "Firmes":       {color:"#C2410C", key:"gomsa_firmes",  pattern:/firme/i},
+  "No Localizados":{color:"#0369A1",key:"gomsa_noloc",   pattern:/no.?localiz/i},
+  "Sentencias":   {color:"#065F46", key:"gomsa_sent",    pattern:/sentencia/i},
+  "Definitivos":  {color:"#991B1B", key:"gomsa_def",     pattern:/definitivo/i},
+};
+const LS_HISTORY_KEY = "gomsa_history";
+const LS_META_KEY = "gomsa_meta";
+
+// ============================================================
+// ESTADO EN MEMORIA
+// ============================================================
+let DB = {}; // { "69-B EFOS": { rfc: Map<string, [{nombre,situacion,fecha,entidad}]> } }
+let history_data = [];
+
+// ============================================================
+// INICIO
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => {
+  loadAllFromStorage();
+  renderListasGrid();
+  loadHistory();
+  document.getElementById('searchInput').addEventListener('keydown', e => {
+    if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) doSearch();
+  });
+  updateDbStatus();
+  const bi = document.getElementById('btnImport');
+  if(bi) bi.addEventListener('click', function(){ document.getElementById('importInput').click(); });
+});
+
+// ============================================================
+// NAVEGACIÓN
+// ============================================================
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  event.target.classList.add('active');
+  if(name==='listados') renderListasGrid();
+  if(name==='historial') renderHistorial();
+}
+
+// ============================================================
+// STORAGE — GUARDAR / CARGAR
+// ============================================================
+function detectLista(filename) {
+  const fn = filename.replace(/[_\-\s]/g,'_');
+  for(const [name, cfg] of Object.entries(LISTA_CONFIG)) {
+    if(cfg.pattern.test(filename)) return name;
+  }
+  return null;
+}
+
+async function handleFiles(fileList) {
+  const files = Array.from(fileList);
+  if(!files.length) return;
+  showProgress(0);
+  setLoadStatus('Procesando archivos...');
+  for(let i=0; i<files.length; i++) {
+    const f = files[i];
+    showProgress(Math.round((i/files.length)*80));
+    setLoadStatus(`Procesando: ${f.name}`);
+    await processFile(f);
+  }
+  showProgress(100);
+  setLoadStatus(`✓ ${files.length} archivo(s) procesado(s)`);
+  setTimeout(() => { hideProgress(); setLoadStatus(''); }, 2000);
+  renderListasGrid();
+  updateDbStatus();
+}
+
+function processFile(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const lista = detectLista(file.name);
+        if(!lista) {
+          setLoadStatus(`⚠ No se pudo identificar: ${file.name}`);
+          setTimeout(resolve, 800);
+          return;
+        }
+        const text = e.target.result;
+        // Parse CSV
+        const map = parseCSV(text, lista);
+        // Guardar en memoria
+        DB[lista] = map;
+        // Guardar en localStorage (comprimido CSV)
+        saveToLS(lista, text, file.name);
+        // TAMBIÉN guardar en formato JSON para carga rápida y persistencia robusta
+        saveMapToLS(lista, map);
+        setLoadStatus(`✓ ${lista} cargado — ${countRecords(map)} registros`);
+        await sleep(200);
+        resolve();
+      } catch(err) {
+        setLoadStatus(`✗ Error en ${file.name}: ${err.message}`);
+        setTimeout(resolve, 1000);
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+function parseCSV(text, lista) {
+  const lines = text.split('\n');
+  let headerRow = -1;
+  let rfcCol = -1, nombreCol = -1, situacionCol = -1, fechaCol = -1, entidadCol = -1;
+  // Find header
+  for(let i=0;i<Math.min(10,lines.length);i++) {
+    const upper = lines[i].toUpperCase();
+    if(upper.includes('RFC')) {
+      headerRow = i;
+      const cols = splitCSVLine(lines[i]);
+      cols.forEach((c,idx) => {
+        const cu = c.trim().toUpperCase();
+        if(cu==='RFC') rfcCol=idx;
+        else if(/NOMBRE|RAZON|RAZ.N/.test(cu)) nombreCol=idx;
+        else if(/SITUACI|SUPUESTO/.test(cu)) situacionCol=idx;
+        else if(/FECHA/.test(cu)) fechaCol=idx;
+        else if(/ENTIDAD/.test(cu)) entidadCol=idx;
+      });
+      break;
+    }
+  }
+  if(rfcCol===-1) return new Map();
+  const map = new Map();
+  for(let i=headerRow+1;i<lines.length;i++) {
+    const line = lines[i].trim();
+    if(!line) continue;
+    const cols = splitCSVLine(line);
+    const rfc = (cols[rfcCol]||'').trim().toUpperCase();
+    if(!rfc||rfc==='RFC') continue;
+    const entry = {
+      nombre: nombreCol>=0 ? (cols[nombreCol]||'').trim() : '',
+      situacion: situacionCol>=0 ? (cols[situacionCol]||'').trim() : '',
+      fecha: fechaCol>=0 ? (cols[fechaCol]||'').trim().substring(0,10) : '',
+      entidad: entidadCol>=0 ? (cols[entidadCol]||'').trim() : '',
+    };
+    if(!map.has(rfc)) map.set(rfc, []);
+    map.get(rfc).push(entry);
+  }
+  return map;
+}
+
+function splitCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for(let i=0;i<line.length;i++) {
+    const ch = line[i];
+    if(ch==='"') { inQuotes=!inQuotes; continue; }
+    if(ch===','&&!inQuotes) { result.push(current); current=''; continue; }
+    current+=ch;
+  }
+  result.push(current);
+  return result;
+}
+
+function countRecords(map) {
+  let n=0; map.forEach(v=>n+=v.length); return n;
+}
+
+function saveMapToLS(lista, map) {
+  const cfg = LISTA_CONFIG[lista];
+  if(!cfg || !map || !map.size) return;
+  try {
+    const rows = [];
+    map.forEach((entries, rfc) => entries.forEach(e => rows.push([rfc, e.nombre||'', e.situacion||'', e.fecha||'', e.entidad||''])));
+    const raw = JSON.stringify(rows);
+    const comp = pako.deflate(new TextEncoder().encode(raw));
+    const b64 = btoa(String.fromCharCode(...comp));
+    const CHUNK = 4_500_000;
+    // Limpiar chunks viejos
+    localStorage.removeItem(cfg.key+'_json');
+    const oldChunks = localStorage.getItem(cfg.key+'_json_chunks');
+    if(oldChunks) { const n=parseInt(oldChunks); for(let i=0;i<n;i++) localStorage.removeItem(cfg.key+'_json_'+i); localStorage.removeItem(cfg.key+'_json_chunks'); }
+    if(b64.length > CHUNK) {
+      const n = Math.ceil(b64.length/CHUNK);
+      for(let i=0;i<n;i++) localStorage.setItem(cfg.key+'_json_'+i, b64.slice(i*CHUNK,(i+1)*CHUNK));
+      localStorage.setItem(cfg.key+'_json_chunks', String(n));
+    } else {
+      localStorage.setItem(cfg.key+'_json', b64);
+    }
+  } catch(e) { console.warn('saveMapToLS error', lista, e); }
+}
+
+function saveToLS(lista, csvText, filename) {
+  try {
+    const cfg = LISTA_CONFIG[lista];
+    if(!cfg) return;
+    const compressed = pako.deflate(new TextEncoder().encode(csvText));
+    const b64 = btoa(String.fromCharCode(...compressed));
+    // Firmes puede ser >5MB, dividir si es necesario
+    const CHUNK = 4_500_000;
+    if(b64.length > CHUNK) {
+      const n = Math.ceil(b64.length/CHUNK);
+      for(let i=0;i<n;i++) localStorage.setItem(cfg.key+'_'+i, b64.slice(i*CHUNK,(i+1)*CHUNK));
+      localStorage.setItem(cfg.key+'_chunks', String(n));
+    } else {
+      localStorage.setItem(cfg.key, b64);
+      localStorage.removeItem(cfg.key+'_chunks');
+    }
+    // Meta
+    const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
+    meta[lista] = { filename, size: csvText.length, ts: new Date().toLocaleString('es-MX'), records: countRecords(DB[lista]) };
+    localStorage.setItem(LS_META_KEY, JSON.stringify(meta));
+  } catch(e) {
+    console.warn('localStorage save error:', e);
+  }
+}
+
+function loadAllFromStorage() {
+  const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
+  for(const [lista, cfg] of Object.entries(LISTA_CONFIG)) {
+    // Intentar carga desde JSON importado (más rápido)
+    try {
+      const jc=localStorage.getItem(cfg.key+'_json_chunks');
+      let b64j='';
+      if(jc){const n=parseInt(jc);for(let i=0;i<n;i++)b64j+=localStorage.getItem(cfg.key+'_json_'+i)||'';}
+      else b64j=localStorage.getItem(cfg.key+'_json')||'';
+      if(b64j){
+        const bin=atob(b64j);const bytes=new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+        const rows=JSON.parse(new TextDecoder().decode(pako.inflate(bytes)));
+        const map=new Map();
+        for(const [rfc,nombre,situacion,fecha,entidad] of rows){
+          if(!map.has(rfc))map.set(rfc,[]);
+          map.get(rfc).push({nombre,situacion,fecha,entidad});
+        }
+        DB[lista]=map; continue;
+      }
+    } catch(e){}
+    // Fallback: carga desde CSV comprimido
+    if(!meta[lista]) continue;
+    try {
+      let b64;
+      const chunks=localStorage.getItem(cfg.key+'_chunks');
+      if(chunks){const n=parseInt(chunks);b64='';for(let i=0;i<n;i++)b64+=localStorage.getItem(cfg.key+'_'+i)||'';}
+      else b64=localStorage.getItem(cfg.key)||'';
+      if(!b64) continue;
+      const binary=atob(b64);const bytes=new Uint8Array(binary.length);
+      for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+      const text=new TextDecoder().decode(pako.inflate(bytes));
+      DB[lista]=parseCSV(text,lista);
+    } catch(e){console.warn('Error loading',lista,e);}
+  }
+  const hasData=Object.keys(DB).length>0;
+  document.getElementById('no-data-alert').style.display=hasData?'none':'flex';
+}
+
+// ============================================================
+// BÚSQUEDA
+// ============================================================
+function doSearch() {
+  const raw = document.getElementById('searchInput').value.trim();
+  if(!raw) return;
+  const terms = raw.split(/[\n,;]+/).map(t=>t.trim().toUpperCase()).filter(Boolean);
+  if(!terms.length) return;
+
+  const hasData = Object.keys(DB).length > 0;
+  if(!hasData) {
+    alert('No hay listados cargados. Ve a la pestaña Listados para cargar los archivos CSV.');
+    return;
+  }
+
+  const btn = document.getElementById('searchBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Verificando…';
+
+  setTimeout(() => {
+    const results = searchTerms(terms);
+    renderResults(terms, results);
+    saveToHistory(terms, results);
+    btn.disabled = false;
+    btn.textContent = 'Verificar';
+  }, 50);
+}
+
+function searchTerms(terms) {
+  const hallazgos = [];
+  const homonimos = [];
+  const limpios = [];
+  const advertencias = [];
+
+  for(const term of terms) {
+    // Validar formato RFC
+    const warns = validateRFC(term);
+    if(warns.length) advertencias.push(...warns.map(w => term + ': ' + w));
+
+    const esRFC = looksLikeRFC(term);
+    let foundExact = false;
+    let foundPartial = false;
+
+    for(const [lista, map] of Object.entries(DB)) {
+
+      // 1. RFC EXACTO
+      if(map.has(term)) {
+        map.get(term).forEach(e => {
+          hallazgos.push({term, rfc:term, nombre:e.nombre, lista, situacion:e.situacion, fecha:e.fecha, entidad:e.entidad, tipo:'RFC exacto'});
+        });
+        foundExact = true;
+      }
+
+      // 2. BÚSQUEDA PARCIAL POR NOMBRE (siempre, independiente de si parece RFC)
+      // Si el término tiene 3+ caracteres buscamos en razones sociales/nombres
+      if(term.length >= 3) {
+        map.forEach((entries, rfc) => {
+          entries.forEach(e => {
+            const nombre = (e.nombre || '').toUpperCase();
+            if(!nombre) return;
+            if(nombre.includes(term)) {
+              // Si ya está como hallazgo exacto por RFC, no duplicar
+              const yaEstaExacto = hallazgos.find(h => h.rfc===rfc && h.lista===lista && h.tipo==='RFC exacto');
+              if(yaEstaExacto) return;
+              // Si el RFC buscado coincide exactamente, ya se procesó arriba
+              if(esRFC && rfc === term) return;
+
+              const entry = {term, rfc, nombre:e.nombre, lista, situacion:e.situacion, fecha:e.fecha, entidad:e.entidad, tipo:'Coincidencia de nombre'};
+
+              // Distinguir: si el término es un RFC y el nombre del listado lo contiene = homónimo
+              // Si el término es un nombre y aparece en el listado = hallazgo directo
+              if(esRFC) {
+                // Poco probable pero posible: el RFC del término aparece en el nombre de alguien
+                hallazgos.push({...entry, tipo:'RFC en nombre'});
+              } else {
+                // El término (nombre/palabra) aparece en la razón social del listado
+                // Verificar si ya agregamos este RFC+lista
+                const yaExiste = hallazgos.find(h=>h.rfc===rfc&&h.lista===lista) || homonimos.find(h=>h.rfc===rfc&&h.lista===lista);
+                if(!yaExiste) {
+                  hallazgos.push(entry);
+                  foundPartial = true;
+                }
+              }
+            }
+          });
+        });
+      }
+
+      // 3. BÚSQUEDA POR RFC PARCIAL: si el término es RFC pero puede tener error de formato
+      // buscar registros cuyo RFC contenga el término como subcadena (útil cuando hay espacios o errores)
+      if(esRFC && !foundExact && term.length >= 8) {
+        map.forEach((entries, rfc) => {
+          if(rfc.includes(term) || term.includes(rfc)) {
+            const yaExiste = hallazgos.find(h=>h.rfc===rfc&&h.lista===lista);
+            if(!yaExiste) {
+              entries.forEach(e => {
+                hallazgos.push({term, rfc, nombre:e.nombre, lista, situacion:e.situacion, fecha:e.fecha, entidad:e.entidad, tipo:'RFC similar'});
+              });
+              foundExact = true;
+            }
+          }
+        });
+      }
+    }
+
+    // 4. DETECCIÓN DE HOMÓNIMOS: si el término es un nombre y hay múltiples RFCs distintos
+    // con ese nombre en los listados, marcar los que no coinciden exactamente como homónimos
+    if(!esRFC && term.length >= 4) {
+      const rfcsEncontrados = hallazgos.filter(h=>h.term===term).map(h=>h.rfc);
+      // Si hay más de un RFC para el mismo término de nombre, pueden ser homónimos entre sí
+      // Se muestran todos como hallazgos para que el usuario evalúe
+    }
+
+    if(!foundExact && !foundPartial) limpios.push(term);
+  }
+
+  return {hallazgos, limpios, advertencias};
+}
+
+function looksLikeRFC(s) {
+  // RFC persona moral: 3 letras + 6 dígitos + 3 homoclave = 12 chars
+  // RFC persona física: 4 letras + 6 dígitos + 3 homoclave = 13 chars
+  // Ser flexible: si empieza con letras seguidas de dígitos, asumir RFC
+  return /^[A-ZÑ&]{2,4}\d{6}/.test(s) && s.length >= 9;
+}
+
+function validateRFC(rfc) {
+  const warns = [];
+  // Caracteres cirílicos
+  if(/[А-ЯЁа-яё]/.test(rfc)) warns.push('contiene caracteres cirílicos — RFC inválido, corregir antes de usar');
+  // Espacios internos
+  if(/\s/.test(rfc.trim())) warns.push('contiene espacios internos');
+  // Longitud anómala para RFC
+  if(looksLikeRFC(rfc) && (rfc.length < 12 || rfc.length > 13)) warns.push('longitud inusual para RFC (' + rfc.length + ' caracteres; esperado 12-13)');
+  // Homoclave numérica pura (últimos 3 dígitos todos números)
+  if(looksLikeRFC(rfc) && rfc.length >= 12 && /\d{3}$/.test(rfc)) warns.push('homoclave numérica pura — verificar contra CSF');
+  // Dígito donde van letras iniciales
+  if(/^[A-ZÑ&]*\d[A-ZÑ&]/.test(rfc)) warns.push('posible confusión O/0 en las iniciales');
+  return warns;
+}
+
+
+// ============================================================
+// RENDER RESULTADOS
+// ============================================================
+function renderResults(terms, {hallazgos, limpios, advertencias}) {
+  const container = document.getElementById('resultsContainer');
+  const ts = new Date().toLocaleString('es-MX',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'});
+  const hasH = hallazgos.length>0;
+
+  // Agrupar hallazgos por RFC buscado
+  const hitsHtml = hallazgos.map(h => {
+    const col = LISTA_CONFIG[h.lista]?.color||'#6B7280';
+    const tipoColor = h.tipo==='RFC exacto' ? '#DC2626' : h.tipo==='RFC similar' ? '#C2410C' : '#7C3AED';
+    const tipoLabel = h.tipo || 'Coincidencia';
+    return '<div class="hit">' +
+      '<div class="hit-tags">' +
+        '<span class="tag tag-lista" style="background:'+col+'">'+h.lista+'</span>' +
+        '<span class="tag" style="background:'+tipoColor+';color:#fff">'+tipoLabel+'</span>' +
+        (h.situacion?'<span class="tag tag-sit">'+h.situacion+'</span>':'') +
+        (h.entidad?'<span class="tag tag-ent">'+h.entidad+'</span>':'') +
+      '</div>' +
+      '<div class="hit-rfc">'+h.rfc+'</div>' +
+      (h.nombre?'<div class="hit-nombre">'+h.nombre+'</div>':'') +
+      (h.term && h.term!==h.rfc?'<div class="hit-fecha" style="color:#7C3AED">Término buscado: '+h.term+'</div>':'') +
+      (h.fecha?'<div class="hit-fecha">Publicado: '+h.fecha+'</div>':'') +
+    '</div>';
+  }).join('');
+
+  const cleanHtml = limpios.length?`<div class="clean-row">${limpios.map(r=>`<span class="chip-ok">✓ ${r}</span>`).join('')}</div>`:'';
+
+  const warnHtml = advertencias.length?`<div class="warn-box"><div class="warn-title">⚠ Observaciones de formato</div>${advertencias.map(a=>`<div class="warn-item">• ${a}</div>`).join('')}</div>`:'';
+
+  const ceMsg = hasH ? buildCEMsg(hallazgos) : null;
+  const cardId = 'c'+Date.now();
+  const subHtml = hasH?`<div class="sub-box">
+    <div class="sub-title">Forma de subsanación</div>
+    <div class="sub-text">El único documento aceptable para <strong>validación condicional</strong> de la cuenta es el <strong>oficio emitido por la autoridad fiscal</strong> confirmando que el contribuyente será retirado del listado en la próxima actualización periódica. Una vez materializada su eliminación, la cuenta alcanzará <strong>validación total</strong>.</div>
+    <button class="btn-copy" id="btn_${cardId}" onclick="copyMsg('btn_${cardId}')">📋 Copiar mensaje para Centro de Enlace</button>
+  </div>`:'';
+
+  const div = document.createElement('div');
+  div.className = 'result-card'+(hasH?' has-hit':'');
+  div.dataset.cemsg = ceMsg||'';
+  div.innerHTML = `<div class="result-head ${hasH?'err':'ok'}">
+    <span class="result-head-icon">${hasH?'🔴':'✅'}</span>
+    <div style="flex:1">
+      <div class="result-head-title ${hasH?'err':'ok'}">${hasH?(hallazgos.length+' coincidencia(s) encontrada(s) — revisar detalle'):'Sin hallazgos en ningún listado'}</div>
+      <div class="result-head-sub">${ts} · ${terms.join(', ')}</div>
+    </div>
+  </div>
+  <div class="result-body">${hitsHtml}${cleanHtml}${warnHtml}${subHtml}</div>`;
+
+  if(container.querySelector('.empty-state')) container.innerHTML='';
+  container.prepend(div);
+}
+
+function copyMsg(btnId) {
+  const btn = document.getElementById(btnId);
+  const card = btn.closest('.result-card');
+  const msg = card.dataset.cemsg;
+  if(!msg) return;
+  navigator.clipboard.writeText(msg).then(()=>{
+    btn.textContent='✓ Copiado';
+    btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent='📋 Copiar mensaje para Centro de Enlace'; btn.classList.remove('copied'); },2500);
+  });
+}
+
+function clearResults() {
+  document.getElementById('resultsContainer').innerHTML=`<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">Ingresa RFC o nombres arriba</div><div class="empty-sub">Los resultados aparecerán aquí</div></div>`;
+}
+
+// ============================================================
+// MENSAJE CENTRO DE ENLACE
+// ============================================================
+function buildCEMsg(hallazgos) {
+  const lineas = hallazgos.map(h=>'• '+(h.nombre?h.nombre+' ':'')+'(RFC: '+h.rfc+') — LISTA: '+h.lista+' | TIPO: '+(h.tipo||'Coincidencia')+(h.situacion?' | '+h.situacion:'')+(h.fecha?' | Pub: '+h.fecha:'')+(h.entidad?' | '+h.entidad+')':')') ).join('\n');
+  return `AVISO — VALIDACIÓN DE CUENTA NO PROCEDENTE\n\nSe informa que la presente solicitud de validación NO PUEDE SER PROCESADA en virtud de que los siguientes sujetos se encuentran publicados en los listados del Servicio de Administración Tributaria (SAT):\n\n${lineas}\n\nFUNDAMENTO: Artículos 69, 69-B y 69-B Bis del Código Fiscal de la Federación.\n\nFORMA DE SUBSANACIÓN: El único documento aceptable para alcanzar una validación condicional de la cuenta es el oficio emitido por la autoridad fiscal mediante el cual confirme que el contribuyente será retirado del listado correspondiente en la siguiente actualización periódica. Una vez que se compruebe que ha sido materializada su eliminación del listado, la cuenta podrá alcanzar la validación total.\n\nSe pone a disposición del solicitante esta información para los efectos legales a que haya lugar.\n\nÁrea Jurídica — GOMSA\n${new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric'})}`;
+}
+
+// ============================================================
+// LISTADOS GRID
+// ============================================================
+function renderListasGrid() {
+  const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
+  const grid = document.getElementById('listasGrid');
+  grid.innerHTML = Object.entries(LISTA_CONFIG).map(([name, cfg])=>{
+    const m = meta[name];
+    const loaded = !!DB[name] && DB[name].size>0;
+    const count = loaded ? DB[name].size : 0;
+    return `<div class="lista-card ${loaded?'loaded':'missing'}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+        <div class="lista-name">${name}</div>
+        ${loaded?`<span class="status-pill pill-ok">✓ Cargado</span>`:`<span class="status-pill pill-gray">Sin datos</span>`}
+      </div>
+      ${m?`<div class="lista-meta">📄 ${m.filename}</div><div class="lista-meta">🕒 ${m.ts}</div>`:'<div class="lista-meta">—</div>'}
+      ${loaded?`<div class="lista-count" style="color:${cfg.color}">${count.toLocaleString()} RFC únicos</div>`:''}
+      ${loaded?`<button class="btn btn-danger btn-sm" style="margin-top:8px;width:100%" onclick="deleteLista('${name}')">Eliminar</button>`:''}
+    </div>`;
+  }).join('');
+}
+
+function deleteLista(name) {
+  if(!confirm(`¿Eliminar la lista "${name}"?`)) return;
+  const cfg = LISTA_CONFIG[name];
+  localStorage.removeItem(cfg.key);
+  const chunks = localStorage.getItem(cfg.key+'_chunks');
+  if(chunks) { const n=parseInt(chunks); for(let i=0;i<n;i++) localStorage.removeItem(cfg.key+'_'+i); localStorage.removeItem(cfg.key+'_chunks'); }
+  const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
+  delete meta[name];
+  localStorage.setItem(LS_META_KEY, JSON.stringify(meta));
+  delete DB[name];
+  renderListasGrid();
+  updateDbStatus();
+}
+
+function clearAll() {
+  if(!confirm('¿Borrar TODOS los listados? Esta acción no se puede deshacer.')) return;
+  for(const cfg of Object.values(LISTA_CONFIG)) {
+    localStorage.removeItem(cfg.key);
+    const chunks = localStorage.getItem(cfg.key+'_chunks');
+    if(chunks) { const n=parseInt(chunks); for(let i=0;i<n;i++) localStorage.removeItem(cfg.key+'_'+i); localStorage.removeItem(cfg.key+'_chunks'); }
+  }
+  localStorage.removeItem(LS_META_KEY);
+  DB = {};
+  renderListasGrid();
+  updateDbStatus();
+  document.getElementById('no-data-alert').style.display='flex';
+}
+
+function refreshStatus() { loadAllFromStorage(); renderListasGrid(); updateDbStatus(); }
+
+function showStorageInfo() {
+  let total = 0;
+  for(let i=0;i<localStorage.length;i++) {
+    const k = localStorage.key(i);
+    if(k.startsWith('gomsa_')) total += (localStorage.getItem(k)||'').length;
+  }
+  alert(`Espacio usado por GOMSA Verificador SAT:\n${(total/1024/1024).toFixed(2)} MB\n\n(El límite típico de localStorage es 5-10 MB por origen)`);
+}
+
+function updateDbStatus() {
+  const loaded = Object.values(DB).filter(m=>m&&m.size>0).length;
+  const total = Object.keys(LISTA_CONFIG).length;
+  document.getElementById('dbStatus').textContent = loaded>0 ? `${loaded}/${total} listas cargadas` : 'Sin datos';
+  document.getElementById('no-data-alert').style.display = loaded>0?'none':'flex';
+}
+
+
+// ============================================================
+// EXPORTAR / IMPORTAR BASE DE DATOS
+// ============================================================
+function exportDB() {
+  const loaded = Object.entries(DB).filter(([,m])=>m&&m.size>0);
+  if(!loaded.length) { alert('No hay listados cargados para exportar.'); return; }
+  const meta = JSON.parse(localStorage.getItem(LS_META_KEY)||'{}');
+  const out = {version:1, exportedAt:new Date().toISOString(), meta, data:{}};
+  for(const [lista, map] of loaded) {
+    out.data[lista]=[];
+    map.forEach((entries,rfc)=>entries.forEach(e=>out.data[lista].push([rfc,e.nombre||'',e.situacion||'',e.fecha||'',e.entidad||''])));
+  }
+  const blob = new Blob([JSON.stringify(out)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const d = new Date();
+  const date = String(d.getDate()).padStart(2,'0')+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+d.getFullYear();
+  a.href = url;
+  a.download = 'GOMSA_SAT_DB_'+date+'.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importDB(file) {
+  if(!file) return;
+  document.getElementById('importInput').value='';
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    try {
+      const out=JSON.parse(e.target.result);
+      if(!out.version||!out.data) throw new Error('Formato inválido');
+      let total=0;
+      for(const [lista,rows] of Object.entries(out.data)) {
+        const map=new Map();
+        for(const [rfc,nombre,situacion,fecha,entidad] of rows){
+          if(!map.has(rfc)) map.set(rfc,[]);
+          map.get(rfc).push({nombre,situacion,fecha,entidad});
+        }
+        DB[lista]=map; total+=map.size;
+        const cfg=LISTA_CONFIG[lista]; if(!cfg) continue;
+        try {
+          const raw=JSON.stringify(rows);
+          const comp=pako.deflate(new TextEncoder().encode(raw));
+          const b64=btoa(String.fromCharCode(...comp));
+          const CHUNK=4_500_000;
+          if(b64.length>CHUNK){
+            const n=Math.ceil(b64.length/CHUNK);
+            for(let i=0;i<n;i++) localStorage.setItem(cfg.key+'_json_'+i,b64.slice(i*CHUNK,(i+1)*CHUNK));
+            localStorage.setItem(cfg.key+'_json_chunks',String(n));
+          } else {
+            localStorage.setItem(cfg.key+'_json',b64);
+            localStorage.removeItem(cfg.key+'_json_chunks');
+          }
+        } catch(err){console.warn('LS error',lista,err);}
+      }
+      if(out.meta) localStorage.setItem(LS_META_KEY,JSON.stringify(out.meta));
+      renderListasGrid(); updateDbStatus();
+      document.getElementById('no-data-alert').style.display='none';
+      setLoadStatus('✓ Importado — '+total.toLocaleString()+' RFC únicos en '+Object.keys(out.data).length+' listas');
+      setTimeout(()=>setLoadStatus(''),4000);
+    } catch(err){ alert('Error al importar: '+err.message); }
+  };
+  reader.readAsText(file);
+}
+
+// ============================================================
+// HISTORIAL
+// ============================================================
+function loadHistory() {
+  try { history_data = JSON.parse(localStorage.getItem(LS_HISTORY_KEY)||'[]'); } catch{ history_data=[]; }
+}
+
+function saveToHistory(terms, results) {
+  const entry = { ts: new Date().toLocaleString('es-MX'), terms, hallazgos: results.hallazgos.length, limpios: results.limpios.length };
+  history_data.unshift(entry);
+  if(history_data.length>100) history_data = history_data.slice(0,100);
+  try { localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(history_data)); } catch{}
+}
+
+function renderHistorial() {
+  const c = document.getElementById('historialContainer');
+  if(!history_data.length) {
+    c.innerHTML=`<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Sin consultas aún</div></div>`;
+    return;
+  }
+  c.innerHTML = `<div class="card"><table><thead><tr><th>Fecha/hora</th><th>Términos consultados</th><th>Hallazgos</th><th>Limpios</th></tr></thead><tbody>${
+    history_data.map(e=>`<tr>
+      <td style="white-space:nowrap;color:var(--gray-400)">${e.ts}</td>
+      <td style="font-family:monospace;font-size:11px">${e.terms.join(', ')}</td>
+      <td>${e.hallazgos>0?`<span class="status-pill pill-err">🔴 ${e.hallazgos}</span>`:`<span class="status-pill pill-ok">✓ 0</span>`}</td>
+      <td><span class="status-pill pill-gray">${e.limpios}</span></td>
+    </tr>`).join('')
+  }</tbody></table></div>`;
+}
+
+function clearHistory() {
+  if(!confirm('¿Limpiar el historial?')) return;
+  history_data=[];
+  localStorage.removeItem(LS_HISTORY_KEY);
+  renderHistorial();
+}
+
+// ============================================================
+// DRAG & DROP
+// ============================================================
+function dragOver(e){ e.preventDefault(); document.getElementById('dropzone').classList.add('drag'); }
+function dragLeave(){ document.getElementById('dropzone').classList.remove('drag'); }
+function dropFiles(e){ e.preventDefault(); dragLeave(); handleFiles(e.dataTransfer.files); }
+
+// ============================================================
+// UTILS
+// ============================================================
+function showProgress(pct){ document.getElementById('progressBar').style.display='block'; document.getElementById('progressFill').style.width=pct+'%'; }
+function hideProgress(){ document.getElementById('progressBar').style.display='none'; document.getElementById('progressFill').style.width='0'; }
+function setLoadStatus(msg){ document.getElementById('loadStatus').textContent=msg; }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+</script>
+</body>
+</html>
